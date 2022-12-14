@@ -1,0 +1,19 @@
+{
+    "name": "avallac/dlink-controller",
+    "type": "project",
+    "require": {
+        "guzzlehttp/guzzle": "^7.5"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Avallac\\DlinkController\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Petr Petrenko",
+            "email": "mail@avallac.ru"
+        }
+    ]
+}
