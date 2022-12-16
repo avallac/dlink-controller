@@ -15,6 +15,7 @@ if (empty($yaml)) {
 }
 $config = \Symfony\Component\Yaml\Yaml::parse($yaml);
 $update = $config['config']['UPDATE'] ?? false;
+$update = $update === true;
 
 $ip = $argv[1];
 $dev = new \Avallac\DlinkController\DGS121010MP($ip, $config['config'], $argv[2]);

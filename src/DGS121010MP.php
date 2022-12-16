@@ -1218,6 +1218,11 @@ class DGS121010MP extends AbstractController
             $this->checkACLNumRules($fix);
             $this->checkRules($fix);
             $this->checkBindAcl($fix);
+
+            if ($fix) {
+                print "Сохранение конфигурации\n";
+                $this->saveConfig();
+            }
         }
 
         return $this->result;
