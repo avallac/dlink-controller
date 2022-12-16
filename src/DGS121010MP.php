@@ -7,6 +7,7 @@ class DGS121010MP extends AbstractController
     protected $ip;
     protected $code;
     protected $password;
+    protected $config;
 
     const VERSION = '6.20.B013';
     const PROTO = 'HTTPS://';
@@ -19,8 +20,9 @@ class DGS121010MP extends AbstractController
     const FW_STATUS_UPDATING = 1;
     const FW_STATUS_UPDATED = 3;
 
-    public function __construct($ip, $password = 'admin', $url = '/homepage.htm')
+    public function __construct($ip, $config, $password = 'admin', $url = '/homepage.htm')
     {
+        $this->config = $config;
         $this->startTest('Авторизация');
         $this->ip = $ip;
         $this->password = $password;
@@ -138,24 +140,10 @@ class DGS121010MP extends AbstractController
 
     protected function addRule($ruleId)
     {
-        $template = [
-            '100' => [
-                'postAccessID' => '100',
-                'SrcIP_Sel' => '2',
-                'DstIP_Sel' => '1',
-                'DstIPstr' => '10.2.2.3',
-                'dstIP_Mask' => '255.255.255.255',
-                'action' => '1',
-            ],
-            '101' => [
-                'postAccessID' => '101',
-                'SrcIP_Sel' => '2',
-                'DstIP_Sel' => '1',
-                'DstIPstr' => '10.13.199.252',
-                'dstIP_Mask' => '255.255.255.255',
-                'action' => '1',
-            ],
-            '200' => [
+        $acl = $this->config['ACL'] ?? [];
+        $ip = $acl[$ruleId - 100] ?? null;
+        if ($ruleId === 200) {
+            $rule = [
                 'postAccessID' => '200',
                 'SrcIP_Sel' => '2',
                 'DstIP_Sel' => '2',
@@ -166,11 +154,21 @@ class DGS121010MP extends AbstractController
                 'TCPdesPort' => '',
                 'TCPdesPortMask' => '',
                 'action' => '2',
-            ],
-            'verify' => false
-        ];
+            ];
+        } elseif (!empty($ip)) {
+            $rule = [
+                'postAccessID' => '100',
+                'SrcIP_Sel' => '2',
+                'DstIP_Sel' => '1',
+                'DstIPstr' => $ip,
+                'dstIP_Mask' => '255.255.255.255',
+                'action' => '1',
+            ];
+        } else {
+            throw new \Exception('ошибка с ACL правилом' . $ruleId);
+        }
 
-        $data['form_params'] = $template[$ruleId];
+        $data['form_params'] = $rule;
         $data['form_params']['Gambit'] = $this->code;
         $data['form_params']['FormName'] = 'aclruleAdd_rule';
         $data['form_params']['postProfileID'] = '1';
@@ -185,10 +183,16 @@ class DGS121010MP extends AbstractController
     protected function checkACLNumRules($tryToUpdate)
     {
         $template = [
-            '100' => ['1','13','256','100','1','1'],
-            '101' => ['1','13','256','101','1','1'],
             '200' => ['1','13','6','200','2','1']
         ];
+        $acl = $this->config['ACL'] ?? [];
+
+        $id = 100;
+        foreach ($acl as $ip) {
+            $id++;
+            $template[(string)$id] = ['1','13','256',(string)$id,'1','1'];
+        }
+
         $result = true;
         $this->startTest('Проверка списка правил ACL');
 
@@ -247,25 +251,28 @@ class DGS121010MP extends AbstractController
     protected function checkRules($tryToUpdate)
     {
         $result = true;
+        $acl = $this->config['ACL'] ?? [];
+        if (empty($acl)) {
+            $this->addError('ACL не задан в файле конфигурации', []);
+            $this->resultTest(false);
+            return;
+        }
+
         $this->startTest('Проверка правил ACL');
-        $data = $this->getACLRule(100);
-        if ($data !== '[["1","PROFILEID","01"],["1","SourceIP","0.0.0.0"],["1","DestinationIP","10.2.2.3"],["1","SourceIPMask","0.0.0.0"],["1","DestinationIPMask","255.255.255.255"],["1","IPProtocol","256"],["1","SourcePort","-1"],["1","DestinationPort","-1"],["1","SourcePortMask","ffff"],["1","DestinationPortMask","ffff"],["1","ICMPType","-1"],["1","ICMPCode","-1"],["1","IGMPType","-1"],["1","TOS","-1"],["1","DSCP","-1"],["1","Access",["1",""]],["1","Priority",-1],["1","ReplacePriority",2]]') {
-            $this->addError('Ошибка в правиле ' . 100, $data);
-            $result = false;
-            if ($tryToUpdate) {
-                $this->deleteRule(100);
-                $this->addRule(100);
+        $numRule = 100;
+        foreach ($acl as $ip) {
+            $data = $this->getACLRule($numRule);
+            if ($data !== '[["1","PROFILEID","01"],["1","SourceIP","0.0.0.0"],["1","DestinationIP","' . $ip . '"],["1","SourceIPMask","0.0.0.0"],["1","DestinationIPMask","255.255.255.255"],["1","IPProtocol","256"],["1","SourcePort","-1"],["1","DestinationPort","-1"],["1","SourcePortMask","ffff"],["1","DestinationPortMask","ffff"],["1","ICMPType","-1"],["1","ICMPCode","-1"],["1","IGMPType","-1"],["1","TOS","-1"],["1","DSCP","-1"],["1","Access",["1",""]],["1","Priority",-1],["1","ReplacePriority",2]]') {
+                $this->addError('Ошибка в правиле ' . $numRule, $data);
+                $result = false;
+                if ($tryToUpdate) {
+                    $this->deleteRule($numRule);
+                    $this->addRule($numRule);
+                }
             }
+            $numRule ++;
         }
-        $data = $this->getACLRule(101);
-        if ($data !== '[["1","PROFILEID","01"],["1","SourceIP","0.0.0.0"],["1","DestinationIP","10.13.199.252"],["1","SourceIPMask","0.0.0.0"],["1","DestinationIPMask","255.255.255.255"],["1","IPProtocol","256"],["1","SourcePort","-1"],["1","DestinationPort","-1"],["1","SourcePortMask","ffff"],["1","DestinationPortMask","ffff"],["1","ICMPType","-1"],["1","ICMPCode","-1"],["1","IGMPType","-1"],["1","TOS","-1"],["1","DSCP","-1"],["1","Access",["1",""]],["1","Priority",-1],["1","ReplacePriority",2]]') {
-            $this->addError('Ошибка в правиле ' . 101, $data);
-            $result = false;
-            if ($tryToUpdate) {
-                $this->deleteRule(101);
-                $this->addRule(101);
-            }
-        }
+
         $data = $this->getACLRule(200);
         if ($data !== '[["1","PROFILEID","01"],["1","SourceIP","0.0.0.0"],["1","DestinationIP","0.0.0.0"],["1","SourceIPMask","0.0.0.0"],["1","DestinationIPMask","0.0.0.0"],["1","IPProtocol","6"],["1","SourcePort","-1"],["1","DestinationPort","-1"],["1","SourcePortMask","ffff"],["1","DestinationPortMask","ffff"],["1","ICMPType","-1"],["1","ICMPCode","-1"],["1","IGMPType","-1"],["1","TOS","-1"],["1","DSCP","-1"],["1","Access",["2",""]],["1","Priority",-1],["1","ReplacePriority",2]]') {
             $this->addError('Ошибка в правиле ' . 200, $data);
@@ -519,8 +526,13 @@ class DGS121010MP extends AbstractController
             $result = false;
         }
         $uri = self::PROTO . $this->ip . '/iss/specific/SNMP.js?Gambit=' . $this->code;
+        $community = $this->config['SNMP'] ?? null;
         $data = (string)($this->request($uri))->getBody();
-        if (strpos($data,  "var SNMP_Data = [['ReadWrite','Cur8OvWeish']]") === false) {
+
+        if (!$community) {
+            $this->addError('SNMP не задан в конфиге', $data);
+            $result = false;
+        } elseif (strpos($data,  "var SNMP_Data = [['ReadWrite','" . $community ."']]") === false) {
             $this->addError('SNMP не настроен', $data);
             $result = false;
         }
@@ -534,25 +546,31 @@ class DGS121010MP extends AbstractController
         $this->startTest('Проверка sNTP');
         $uri = self::PROTO . $this->ip . '/iss/specific/SNTPTimeSet.js?Gambit=' . $this->code;
         $data = (string)($this->request($uri))->getBody();
-        if (strpos($data, "SNTP_Server = ['10.2.2.11','0.0.0.0','30'];") === false) {
-            $this->addError('sNTP не настроен', $data);
-            $result = false;
-        }
+        $ntpServer = $this->config['NTP'] ?? null;
+        if (!empty($ntpServer)) {
+            if (strpos($data, "SNTP_Server = ['" . $ntpServer . "','0.0.0.0','30'];") === false) {
+                $this->addError('sNTP не настроен', $data);
+                $result = false;
+            }
 
-        if (strpos($data, "var SNTP_Time_Status = [1,") === false) {
-            $this->addError('sNTP не включен', $data);
+            if (strpos($data, "var SNTP_Time_Status = [1,") === false) {
+                $this->addError('sNTP не включен', $data);
+                $result = false;
+            }
+        } else {
+            $this->addError('sNTP не задан в конфигурации', $data);
             $result = false;
         }
 
         $this->resultTest($result);
 
-        if (!$result && $tryToUpdate) {
-            $this->updateSNTP();
+        if (!$result && $tryToUpdate && !empty($ntpServer)) {
+            $this->updateSNTP($ntpServer);
             $this->checkSNTP(false);
         }
     }
 
-    protected function updateSNTP()
+    protected function updateSNTP($ntpServer)
     {
         $data = [
             'form_params' => [
@@ -571,7 +589,7 @@ class DGS121010MP extends AbstractController
                 'sec' => '',
                 'SNTP_STATUS' => 1,
                 'pri_radio_serverip' => 1,
-                'PRI_SERVER_v4' => '10.2.2.11',
+                'PRI_SERVER_v4' => $ntpServer,
                 'sec_radio_serverip' => 1,
                 'SEC_SERVER_v4' => '0.0.0.0',
                 'POLL_TIME' => 30,
@@ -1192,8 +1210,6 @@ class DGS121010MP extends AbstractController
             $this->checkSNMP();
             $this->checkLLDP($fix);
             $this->checkSNTP($fix);
-            $this->checkSysLogEnable($fix);
-            $this->checkSysLogSettings($fix);
             $this->checkSafeguardEngine($fix);
             $this->checkPortError();
             $this->checkVlan();

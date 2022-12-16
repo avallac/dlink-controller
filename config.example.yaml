@@ -1,0 +1,7 @@
+config:
+  UPDATE: true
+  NTP: 10.2.2.11
+  SNMP: private
+  ACL:
+    - 10.13.199.252
+    - 10.10.10.167

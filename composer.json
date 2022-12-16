@@ -2,7 +2,8 @@
     "name": "avallac/dlink-controller",
     "type": "project",
     "require": {
-        "guzzlehttp/guzzle": "^7.5"
+        "guzzlehttp/guzzle": "^7.5",
+        "symfony/yaml": "^5.4"
     },
     "license": "MIT",
     "autoload": {
