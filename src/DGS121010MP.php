@@ -157,7 +157,7 @@ class DGS121010MP extends AbstractController
             ];
         } elseif (!empty($ip)) {
             $rule = [
-                'postAccessID' => '100',
+                'postAccessID' => (string)$ruleId,
                 'SrcIP_Sel' => '2',
                 'DstIP_Sel' => '1',
                 'DstIPstr' => $ip,
@@ -175,6 +175,7 @@ class DGS121010MP extends AbstractController
         $data['form_params']['postActionType'] = 'create';
         $data['form_params']['tempAccessID'] = '';
         $data['form_params']['Sequence_No_Sel'] = '1';
+        $data['verify'] = false;
 
         $uri = self::PROTO . $this->ip . '/iss/specific/ACLRule.js?profileID=1';
         (new \GuzzleHttp\Client())->request('POST', $uri, $data);
@@ -189,8 +190,8 @@ class DGS121010MP extends AbstractController
 
         $id = 100;
         foreach ($acl as $ip) {
-            $id++;
             $template[(string)$id] = ['1','13','256',(string)$id,'1','1'];
+            $id++;
         }
 
         $result = true;
@@ -514,7 +515,7 @@ class DGS121010MP extends AbstractController
         }
     }
 
-    protected function checkSNMP()
+    protected function checkSNMP($tryToUpdate)
     {
         $result = true;
         $this->startTest('Проверка SNMP');
@@ -528,16 +529,85 @@ class DGS121010MP extends AbstractController
         $uri = self::PROTO . $this->ip . '/iss/specific/SNMP.js?Gambit=' . $this->code;
         $community = $this->config['SNMP'] ?? null;
         $data = (string)($this->request($uri))->getBody();
+        $foundValidSNMP = false;
 
         if (!$community) {
             $this->addError('SNMP не задан в конфиге', $data);
             $result = false;
-        } elseif (strpos($data,  "var SNMP_Data = [['ReadWrite','" . $community ."']]") === false) {
-            $this->addError('SNMP не настроен', $data);
+        } elseif (strpos($data, "var SNMP_Data = [];") !== false) {
+            $this->addError('Нет SNMP community', []);
             $result = false;
+            if ($tryToUpdate) {
+                $this->addSNMP($community, 'ReadWrite');
+            }
+        } elseif (preg_match("|var SNMP_Data = (\[[^;]+\]);|s", $data, $m)) {
+            $string = str_replace(["\r\n", "\n", " ", "\t"], '', $m[1]);
+            $string = str_replace("'", '"', $string);
+            $snmpConfig = json_decode($string, true);
+            if (!empty($snmpConfig)) {
+                foreach ($snmpConfig as $item) {
+                    if ($item[1] !== $community || $item[0] !== 'ReadWrite') {
+                        $this->addError('Неправильный SNMP' . $item[0] . ':' . $item[1], []);
+                        $result = false;
+                        if ($tryToUpdate) {
+                            $this->rmSNMP($item[1], $item[0]);
+                        }
+                    } else {
+                        $foundValidSNMP = true;
+                    }
+                }
+
+                if (!$foundValidSNMP) {
+                    $result = false;
+                    $this->addError('Не найден правильный SNMP', []);
+                    if ($tryToUpdate) {
+                        $this->addSNMP($community, 'ReadWrite');
+                    }
+                }
+            } else {
+                $result = false;
+                $this->addError('Не удалось получить конфигурацию SNMP', $data);
+            }
+        } else {
+            $result = false;
+            $this->addError('Не удалось получить конфигурацию SNMP', $data);
         }
 
         $this->resultTest($result);
+
+        if (!$result && $tryToUpdate && $community) {
+            $this->checkSNMP(false);
+        }
+    }
+
+    protected function rmSNMP($community, $view)
+    {
+        $data = [
+            'form_params' => [
+                'Gambit' => $this->code,
+                'COMMUNITY_INDEX' => $community,
+                'SECURITY_NAME' => $view,
+                'ACTION' => 'Delete',
+            ],
+            'verify' => false
+        ];
+        $uri = self::PROTO . $this->ip . '/iss/specific/SNMP_Community.js';
+        (new \GuzzleHttp\Client())->request('POST', $uri, $data);
+    }
+
+    protected function addSNMP($community, $view)
+    {
+        $data = [
+            'form_params' => [
+                'Gambit' => $this->code,
+                'COMMUNITY_INDEX' => $community,
+                'SECURITY_NAME' => $view,
+                'applybutton' => 'Add',
+            ],
+            'verify' => false
+        ];
+        $uri = self::PROTO . $this->ip . '/iss/specific/SNMP_Community.js';
+        (new \GuzzleHttp\Client())->request('POST', $uri, $data);
     }
 
     protected function checkSNTP(bool $tryToUpdate)
@@ -548,7 +618,8 @@ class DGS121010MP extends AbstractController
         $data = (string)($this->request($uri))->getBody();
         $ntpServer = $this->config['NTP'] ?? null;
         if (!empty($ntpServer)) {
-            if (strpos($data, "SNTP_Server = ['" . $ntpServer . "','0.0.0.0','30'];") === false) {
+            if (strpos($data, "SNTP_Server = ['" . $ntpServer . "','0.0.0.0','30'];") === false &&
+                strpos($data, "SNTP_Server = ['" . $ntpServer . "','0.0.0.0','0.0.0.0','30'];") === false) {
                 $this->addError('sNTP не настроен', $data);
                 $result = false;
             }
@@ -1207,7 +1278,7 @@ class DGS121010MP extends AbstractController
         if ($this->code) {
             $this->checkVersion();
             $this->checkSystem($fix);
-            $this->checkSNMP();
+            $this->checkSNMP($fix);
             $this->checkLLDP($fix);
             $this->checkSNTP($fix);
             $this->checkSafeguardEngine($fix);
